@@ -1,5 +1,5 @@
 ---
-title: "SGE Behavior Project"
+title: "SGE Aging Project"
 output:
   html_document:
     code_folding: hide
@@ -8,8 +8,8 @@ output:
   pdf_document: default
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, cache = T)
+```{r setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = T, cache.lazy = FALSE, message = FALSE)
 library(ggplot2)
 library(limma)
 library(edgeR)
@@ -17,17 +17,114 @@ library(EMMREML)
 library(data.table)
 library(cobs)
 library(scales)
-library(qvalue)
 library(GGally)
-library(pheatmap)
 library(ggpmisc)
 library(GGally)
 library(cowplot)
-library(EloRating)
-library(steepness)
-library(compete)
 library(gridExtra)
 library(reshape2)
-library(broman)
+library(Seurat)
+library(dplyr)
+library(gtools)
 library(viridis)
 ```
+<!-- read in single-cell data from aging cohort and process into seurat object -->
+```{r readFiles}
+AS <- readRDS(file = '/Users/noah/Desktop/SGE_data_objects/AS_7SEP20.rds')
+```
+
+<!-- ```{r ASplots, warning=FALSE, message=FALSE} -->
+<!-- #DimPlot(AS, reduction = "umap", label = T) -->
+<!-- #DotPlot(AS, features=c("CD79A","MS4A1","NKG7","GNLY","CST3","CD14","LYZ","CD3D","IL7R","S100A4","CD8A","PPBP")) + -->
+<!--   #theme(axis.text.x = element_text(angle = 90, hjust = 1)) -->
+<!-- #pbmc.markers <- FindAllMarkers(AS, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25) -->
+<!-- #pbmc.markers %>% group_by(cluster) %>% top_n(n = 2, wt = avg_logFC) -->
+<!-- ``` -->
+## Age series cell clustering
+Here we are matching the cell-type clustering of the SGE data as follows:
+
+![](/Users/noah/Desktop/AS_DimPlot_celltypes.png.001.png)
+
+## PCA on cell type composition
+```{r, message=FALSE, warning=FALSE}
+# define age, group, and individuals names
+age <- c(21.54,10.99,10.96,4.47,5.31,22.36,21.53,10.62,11.41,23.3,19.52,11.23,3.52,5.18)
+group <- as.factor(c('1','1','1','1','1','2','2','2','2','3','3','3','3','3'))
+ind_list <- unique(substr(AS@assays$RNA@counts@Dimnames[[2]],1,5))
+ind_list <- gsub("_","",ind_list)
+
+# define a list of clusters for each cell type as follows:
+#CD4+ helper T: 0,3
+#CD8+ helper T: 1,2
+#Bcells: 4,8
+#NK: 5
+#CD14hi: 6
+#CD14low: 7
+#celltype_clusters <- c('0,3',
+#                       '1,2',
+#                       '4,8',
+#                       '5',
+#                       '6',
+#                       '7')
+#
+
+cellcount.mat <- as.data.frame(matrix(nrow = 14, ncol = 0))
+
+for (i in 0:11){
+  tmp <- SubsetData(object = AS, ident.use = i)
+  cellcount_tmp <- matrix(nrow = 0,ncol = 1)
+  for (ind in ind_list){
+    tmp2 <- (sum(tmp$ID == ind))
+    cellcount_tmp <- rbind(cellcount_tmp,tmp2)
+  }
+  cellcount.mat <- cbind(cellcount.mat, cellcount_tmp)
+}
+
+cellcount.mat2 <- as.data.frame(matrix(nrow = 14, ncol = 6))
+#add cluster together to get cell type-level counts
+cellcount.mat2[,1] <- cellcount.mat[,1] + cellcount.mat[,4]
+cellcount.mat2[,2] <- cellcount.mat[,2] + cellcount.mat[,3]
+cellcount.mat2[,3] <- cellcount.mat[,5] + cellcount.mat[,9]
+cellcount.mat2[,4] <- cellcount.mat[,6]
+cellcount.mat2[,5] <- cellcount.mat[,7]
+cellcount.mat2[,6] <- cellcount.mat[,8]
+colnames(cellcount.mat2) <- c('CD4', 
+                              'CD8', 
+                              'Bcells',
+                              'NK',
+                              'CD14hi', 
+                              'CD14low')
+rownames(cellcount.mat2) <- ind_list
+
+# generate cell proportions from cell counts
+cellprops.mat <- cellcount.mat2
+for (i in 1:6){
+  cellprops.mat[,i]  <- cellcount.mat2[,i] / sum(cellcount.mat2[,i])
+}
+cellprops.mat <- t(cellprops.mat)
+
+design <- model.matrix(~0+group)
+v <- logit(cellprops.mat)
+fit <-lmFit(cellprops.mat,design)
+fit <- eBayes(fit)
+cellprop.resid <-residuals.MArrayLM(object=fit, v)
+
+pca <- prcomp(cov(cellprop.resid))
+for (i in 1:10){
+  print(cor.test(pca$x[,i],age)$p.value)
+}
+
+qplot(pca$x[,1],pca$x[,2],col=age,size=1.5)+
+  xlab(paste("PC1","\nPVE =",round(summary(pca)$imp[2,1],2)))+
+  ylab(paste("PC2","\nPVE =",round(summary(pca)$imp[2,2],2))) + 
+  scale_color_viridis_c(option = 'E') +
+  ggtitle(label = '', subtitle = )
+#ggsave(filename = '/Users/noah/Desktop/agePCA.png', scale = 0.5)
+
+qplot(age, pca$x[,1], col=age,size=1) + xlab('age') + ylab(paste("PC1","\nPVE =",round(summary(pca)$imp[2,1],2))) + stat_smooth(method = 'lm', color='black', size = 1) + scale_color_viridis_c(option = 'E')
+
+qplot(age, pca$x[,3], col=age,size=1) + xlab('age') + ylab(paste("PC3","\nPVE =",round(summary(pca)$imp[2,3],2))) + stat_smooth(method = 'lm', color='black', size = 1) + scale_color_viridis_c(option = 'E')
+#ggsave(filename = '/Users/noah/Desktop/agePC1.png', scale = 0.5)
+
+```
+
