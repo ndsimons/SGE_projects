@@ -27,6 +27,10 @@ library(Seurat)
 library(dplyr)
 library(gtools)
 library(viridis)
+library(SingleCellExperiment)
+library(scater)
+library(scran)
+library(pbapply)
 ```
 <!-- read in single-cell data from aging cohort and process into seurat object -->
 ```{r readFiles}
@@ -74,7 +78,7 @@ for (i in 0:11){
   tmp <- SubsetData(object = AS, ident.use = i)
   cellcount_tmp <- matrix(nrow = 0,ncol = 1)
   for (ind in ind_list){
-    tmp2 <- (sum(tmp$ID == ind))
+    tmp2 <- (sum(tmp$ID == ind)+1)
     cellcount_tmp <- rbind(cellcount_tmp,tmp2)
   }
   cellcount.mat <- cbind(cellcount.mat, cellcount_tmp)
@@ -97,34 +101,375 @@ colnames(cellcount.mat2) <- c('CD4',
 rownames(cellcount.mat2) <- ind_list
 
 # generate cell proportions from cell counts
-cellprops.mat <- cellcount.mat2
-for (i in 1:6){
-  cellprops.mat[,i]  <- cellcount.mat2[,i] / sum(cellcount.mat2[,i])
+cellprops.mat <- cellcount.mat
+for (i in 1:12){
+  cellprops.mat[,i]  <- cellcount.mat[,i] / sum(cellcount.mat[,i])
 }
 cellprops.mat <- t(cellprops.mat)
 
 design <- model.matrix(~0+group)
-v <- logit(cellprops.mat)
+#v <- logit(cellprops.mat)
+v <- cellprops.mat
 fit <-lmFit(cellprops.mat,design)
 fit <- eBayes(fit)
 cellprop.resid <-residuals.MArrayLM(object=fit, v)
 
 pca <- prcomp(cov(cellprop.resid))
+pca_age_cors <- vector()
 for (i in 1:10){
   print(cor.test(pca$x[,i],age)$p.value)
+  pca_age_cors[i] <- cor.test(pca$x[,i],age)$p.value
 }
 
 qplot(pca$x[,1],pca$x[,2],col=age,size=1.5)+
   xlab(paste("PC1","\nPVE =",round(summary(pca)$imp[2,1],2)))+
-  ylab(paste("PC2","\nPVE =",round(summary(pca)$imp[2,2],2))) + 
-  scale_color_viridis_c(option = 'E') +
-  ggtitle(label = '', subtitle = )
+  ylab(paste("PC2","\nPVE =",round(summary(pca)$imp[2,2],2))) 
+#+ 
+  #scale_color_viridis_c(option = 'E') +
+  #ggtitle(label = '', subtitle = )
 #ggsave(filename = '/Users/noah/Desktop/agePCA.png', scale = 0.5)
 
-qplot(age, pca$x[,1], col=age,size=1) + xlab('age') + ylab(paste("PC1","\nPVE =",round(summary(pca)$imp[2,1],2))) + stat_smooth(method = 'lm', color='black', size = 1) + scale_color_viridis_c(option = 'E')
+qplot(age, pca$x[,1], col=age,size=1) + xlab('age') + ylab(paste("PC1","\nPVE =",round(summary(pca)$imp[2,1],2))) + stat_smooth(method = 'lm', color='black', size = 1) 
+#+ scale_color_viridis_c(option = 'E')
 
-qplot(age, pca$x[,3], col=age,size=1) + xlab('age') + ylab(paste("PC3","\nPVE =",round(summary(pca)$imp[2,3],2))) + stat_smooth(method = 'lm', color='black', size = 1) + scale_color_viridis_c(option = 'E')
+qplot(age, pca$x[,2], col=age,size=1) + xlab('age') + ylab(paste("PC2","\nPVE =",round(summary(pca)$imp[2,2],2))) + stat_smooth(method = 'lm', color='black', size = 1) 
+#+ scale_color_viridis_c(option = 'E')
 #ggsave(filename = '/Users/noah/Desktop/agePC1.png', scale = 0.5)
 
+ggplot() +
+  geom_point(aes(x = as.factor(1:10), y = -log10(pca_age_cors), size = 1)) +
+  geom_hline(yintercept = -log10(0.05), color = 'red', linetype = 'dashed', size = 1) +
+  xlab('PC') +
+  ylab('-log10(p)') + 
+  theme(legend.position = 'none')
 ```
 
+Now let's look at the same info, but where clusters have been aggregated into cell types
+```{r}
+cellcount.mat2 <- as.data.frame(matrix(nrow = 14, ncol = 6))
+#add cluster together to get cell type-level counts
+cellcount.mat2[,1] <- cellcount.mat[,1] + cellcount.mat[,4]
+cellcount.mat2[,2] <- cellcount.mat[,2] + cellcount.mat[,3]
+cellcount.mat2[,3] <- cellcount.mat[,5] + cellcount.mat[,9]
+cellcount.mat2[,4] <- cellcount.mat[,6]
+cellcount.mat2[,5] <- cellcount.mat[,7]
+cellcount.mat2[,6] <- cellcount.mat[,8]
+colnames(cellcount.mat2) <- c('CD4', 
+                              'CD8', 
+                              'Bcells',
+                              'NK',
+                              'CD14hi', 
+                              'CD14low')
+rownames(cellcount.mat2) <- ind_list
+
+# generate cell proportions from cell counts
+cellprops.mat <- cellcount.mat2
+for (i in 1:6){
+  cellprops.mat[,i]  <- cellcount.mat[,i] / sum(cellcount.mat[,i])
+}
+cellprops.mat <- t(cellprops.mat)
+
+design <- model.matrix(~0+group)
+#v <- logit(cellprops.mat)
+v <- cellprops.mat
+fit <-lmFit(cellprops.mat,design)
+fit <- eBayes(fit)
+cellprop.resid <-residuals.MArrayLM(object=fit, v)
+
+pca <- prcomp(cov(cellprop.resid))
+pca_age_cors <- vector()
+for (i in 1:10){
+  print(cor.test(pca$x[,i],age)$p.value)
+  pca_age_cors[i] <- cor.test(pca$x[,i],age)$p.value
+}
+
+qplot(pca$x[,1],pca$x[,2],col=age,size=1.5)+
+  xlab(paste("PC1","\nPVE =",round(summary(pca)$imp[2,1],2)))+
+  ylab(paste("PC2","\nPVE =",round(summary(pca)$imp[2,2],2))) 
+#+ 
+  #scale_color_viridis_c(option = 'E') +
+  #ggtitle(label = '', subtitle = )
+#ggsave(filename = '/Users/noah/Desktop/agePCA.png', scale = 0.5)
+
+qplot(age, pca$x[,1], col=age,size=1) + xlab('age') + ylab(paste("PC1","\nPVE =",round(summary(pca)$imp[2,1],2))) + stat_smooth(method = 'lm', color='black', size = 1) 
+#+ scale_color_viridis_c(option = 'E')
+
+qplot(age, pca$x[,2], col=age,size=1) + xlab('age') + ylab(paste("PC2","\nPVE =",round(summary(pca)$imp[2,2],2))) + stat_smooth(method = 'lm', color='black', size = 1) 
+#+ scale_color_viridis_c(option = 'E')
+#ggsave(filename = '/Users/noah/Desktop/agePC1.png', scale = 0.5)
+
+ggplot() +
+  geom_point(aes(x = as.factor(1:10), y = -log10(pca_age_cors), size = 1)) +
+  geom_hline(yintercept = -log10(0.05), color = 'red', linetype = 'dashed', size = 1) +
+  xlab('PC') +
+  ylab('-log10(p)') + 
+  theme(legend.position = 'none')
+```
+
+Now let's look at age correlations with top PCs of pseudomean gene expression
+```{r}
+source('/Users/noah/Desktop/AS.helper.functions.R')
+#### Now let's look at the PCA for the gene expression data itself
+sce <- as.SingleCellExperiment(AS, assay="RNA")
+## QC metrics ##
+names(assays(sce))
+sce <- addPerCellQC(sce)
+sce <- addPerFeatureQC(sce)
+logCPM_filter <- 0.2
+keep_gene <- rowMeans(log2(calculateCPM(sce) + 1)) > logCPM_filter
+sce_filt <- sce[keep_gene,]
+sce_filt <- computeSumFactors(sce_filt)
+sce_filt$size_factor <- sizeFactors(sce_filt)
+colData(sce_filt)$group <- as.factor(colData(sce_filt)$group)
+sce_filt <- sce_filt[, (sizeFactors(sce_filt) < 8 & sizeFactors(sce_filt) > 0.125)]
+
+sce_filt <- logNormCounts(sce_filt, pseudo_count = 1)
+normalized_data <- exprs(sce_filt)
+meta_data <- as.data.frame(colData(sce_filt))
+meta_data$sample_condition <- paste(meta_data$ID, meta_data$trt, sep="")
+sample_colname <- "sample_condition"
+IDs <- as.data.frame(meta_data)[, sample_colname]
+unique_ID_list <- as.list(unique(IDs))
+
+pseudobulk <- as.data.frame(pblapply(unique_ID_list, FUN = function(x){rowMeans(normalized_data[,IDs == x, drop = FALSE])}))
+
+colnames(pseudobulk) <- unique(IDs)
+rownames(pseudobulk) <- rownames(normalized_data)
+pseudobulk <- as.data.frame(pseudobulk)
+object_pseudobulkMeans <- pseudobulk
+
+group <- as.factor(c('1','1','1','1','1','2','2','2','2','3','3','3','3','3'))
+design <- model.matrix(~0+group)
+fit <-lmFit(object_pseudobulkMeans,design)
+fit <- eBayes(fit)
+residuals <-residuals.MArrayLM(object=fit, object_pseudobulkMeans)
+residuals <- residuals[order(rownames(residuals)),]
+residuals <- as.data.frame(residuals)
+
+pca_AS <- prcomp(cov(residuals))
+for (i in 1:10){
+  print(cor.test(pca_AS$x[,i],age)$p.value)
+}
+
+qplot(pca_AS$x[,1],pca_AS$x[,2],col=age,size=1.5)+xlab(paste("PC1","\nPVE =",round(summary(pca_AS)$imp[2,1],2)))+ylab(paste("PC2","\nPVE =",round(summary(pca_AS)$imp[2,2],2)))
+qplot(age, pca_AS$x[,3], col=age,size=1) + xlab('age') + ylab(paste("PC3","\nPVE =",round(summary(pca_AS)$imp[2,3],2))) + stat_smooth(method = 'lm', color='black', size = 1)
+
+pca_pvals <- matrix(nrow = 10, ncol = 2)
+  for (p in 1:10){
+    pca_pvals[p,1] <- cor.test(pca_AS$x[,p],age)$p.value
+  }
+  for (p in 1:10){
+    pca_pvals[p,2] <- summary(pca_AS)$importance[2,p]
+  }
+# plot age cors with PCs
+#pca_AS_pvals <- c(0.2172319,0.3188535,0.03746587,0.0546464,0.9176804,0.9378994,0.6943387,0.8951055,0.7739404,0.5776888)
+
+ggplot() +
+  geom_point(aes(x = 1:10, y = -log10(pca_pvals[,1]), size = 1)) +
+  geom_hline(yintercept = -log10(0.05), color = 'red', linetype = 'dashed', size = 1) +
+  xlab('PC') +
+  ylab('-log10(p)') + 
+  theme(legend.position = 'none')
+
+# Plot PVE per PC
+#pca_AS_EVD <- c(0.663940, 0.1326600, 0.0739200, 0.0480800, 0.0272000, 0.014080, 0.0130000, 0.0093500, 0.0077900, 0.0058300)
+
+ggplot() +
+  geom_point(aes(x = as.factor(1:10), y = pca_pvals[,2])) +
+  geom_line(aes(x = as.factor(1:10), y = pca_pvals[,2], group = 1)) +
+  xlab('PC') +
+  ylab('PVE by PC')
+```
+```{r, warning=FALSE, message=FALSE}
+## Cluster-specific PCAs
+for (i in 0:8){
+  tmp_pseudobulkMeans <- generatePseudobulkMeans(clusterNum = i)
+  tmp_residuals <- generatePseudobulkMeansResiduals(object_pseudobulk = tmp_pseudobulkMeans)
+  pca_AS <- prcomp(cov(tmp_residuals))
+  pca_pvals <- matrix(nrow = 10, ncol = 2)
+  for (p in 1:10){
+    pca_pvals[p,1] <- cor.test(pca_AS$x[,p],age)$p.value
+  }
+  for (p in 1:10){
+    pca_pvals[p,2] <- summary(pca_AS)$importance[2,p]
+  }
+  p1 <- ggplot() +
+          geom_point(aes(x = as.factor(1:10), y = -log10(pca_pvals[,1]), size = 1)) +
+          geom_hline(yintercept = -log10(0.05), color = 'red', linetype = 'dashed', size = 1) +
+          xlab('PC') +
+          ylab('-log10(p)') + 
+          theme(legend.position = 'none') +
+          ggtitle(label = '', subtitle = paste('cluster_',i,sep=''))
+  p2 <- ggplot() +
+          geom_point(aes(x = as.factor(1:10), y = pca_pvals[,2])) +
+          geom_line(aes(x = as.factor(1:10), y = pca_pvals[,2], group = 1)) +
+          xlab('PC') +
+          ylab('PVE by PC') +
+          ggtitle(label = '', subtitle = paste('cluster_',i,sep=''))
+  p_all <- plot_grid(p1,p2)
+  print(p_all)
+}
+```
+
+```{r CD4+ T cells, warning=FALSE, message=FALSE}
+tmp_pseudobulkMeans <- generatePseudobulkMeans(clusterNum = c(0,3))
+tmp_residuals <- generatePseudobulkMeansResiduals(object_pseudobulk = tmp_pseudobulkMeans)
+pca_AS <- prcomp(cov(tmp_residuals))
+pca_pvals <- matrix(nrow = 10, ncol = 2)
+for (p in 1:10){
+  pca_pvals[p,1] <- cor.test(pca_AS$x[,p],age)$p.value
+}
+for (p in 1:10){
+  pca_pvals[p,2] <- summary(pca_AS)$importance[2,p]
+}
+p1 <- ggplot() +
+        geom_point(aes(x = as.factor(1:10), y = -log10(pca_pvals[,1]), size = 1)) +
+        geom_hline(yintercept = -log10(0.05), color = 'red', linetype = 'dashed', size = 1) +
+        xlab('PC') +
+        ylab('-log10(p)') + 
+        theme(legend.position = 'none') +
+        ggtitle(label = '', subtitle = paste('CD4+ T',i,sep=''))
+p2 <- ggplot() +
+        geom_point(aes(x = as.factor(1:10), y = pca_pvals[,2])) +
+        geom_line(aes(x = as.factor(1:10), y = pca_pvals[,2], group = 1)) +
+        xlab('PC') +
+        ylab('PVE by PC') +
+        ggtitle(label = '', subtitle = paste('CD4+ T',i,sep=''))
+p_all <- plot_grid(p1,p2)
+p_all
+```
+```{r CD8+ T cells, warning=FALSE, message=FALSE}
+tmp_pseudobulkMeans <- generatePseudobulkMeans(clusterNum = c(1,2))
+tmp_residuals <- generatePseudobulkMeansResiduals(object_pseudobulk = tmp_pseudobulkMeans)
+pca_AS <- prcomp(cov(tmp_residuals))
+pca_pvals <- matrix(nrow = 10, ncol = 2)
+for (p in 1:10){
+  pca_pvals[p,1] <- cor.test(pca_AS$x[,p],age)$p.value
+}
+for (p in 1:10){
+  pca_pvals[p,2] <- summary(pca_AS)$importance[2,p]
+}
+p1 <- ggplot() +
+        geom_point(aes(x = as.factor(1:10), y = -log10(pca_pvals[,1]), size = 1)) +
+        geom_hline(yintercept = -log10(0.05), color = 'red', linetype = 'dashed', size = 1) +
+        xlab('PC') +
+        ylab('-log10(p)') + 
+        theme(legend.position = 'none') +
+        ggtitle(label = '', subtitle = paste('CD8+ T',i,sep=''))
+p2 <- ggplot() +
+        geom_point(aes(x = as.factor(1:10), y = pca_pvals[,2])) +
+        geom_line(aes(x = as.factor(1:10), y = pca_pvals[,2], group = 1)) +
+        xlab('PC') +
+        ylab('PVE by PC') +
+        ggtitle(label = '', subtitle = paste('CD8+ T',i,sep=''))
+p_all <- plot_grid(p1,p2)
+p_all
+```
+```{r NK, warning=FALSE, message=FALSE}
+tmp_pseudobulkMeans <- generatePseudobulkMeans(clusterNum = c(5))
+tmp_residuals <- generatePseudobulkMeansResiduals(object_pseudobulk = tmp_pseudobulkMeans)
+pca_AS <- prcomp(cov(tmp_residuals))
+pca_pvals <- matrix(nrow = 10, ncol = 2)
+for (p in 1:10){
+  pca_pvals[p,1] <- cor.test(pca_AS$x[,p],age)$p.value
+}
+for (p in 1:10){
+  pca_pvals[p,2] <- summary(pca_AS)$importance[2,p]
+}
+p1 <- ggplot() +
+        geom_point(aes(x = as.factor(1:10), y = -log10(pca_pvals[,1]), size = 1)) +
+        geom_hline(yintercept = -log10(0.05), color = 'red', linetype = 'dashed', size = 1) +
+        xlab('PC') +
+        ylab('-log10(p)') + 
+        theme(legend.position = 'none') +
+        ggtitle(label = '', subtitle = paste('NK',i,sep=''))
+p2 <- ggplot() +
+        geom_point(aes(x = as.factor(1:10), y = pca_pvals[,2])) +
+        geom_line(aes(x = as.factor(1:10), y = pca_pvals[,2], group = 1)) +
+        xlab('PC') +
+        ylab('PVE by PC') +
+        ggtitle(label = '', subtitle = paste('NK',i,sep=''))
+p_all <- plot_grid(p1,p2)
+p_all
+```
+```{r B cells, warning=FALSE, message=FALSE}
+tmp_pseudobulkMeans <- generatePseudobulkMeans(clusterNum = c(4,8))
+tmp_residuals <- generatePseudobulkMeansResiduals(object_pseudobulk = tmp_pseudobulkMeans)
+pca_AS <- prcomp(cov(tmp_residuals))
+pca_pvals <- matrix(nrow = 10, ncol = 2)
+for (p in 1:10){
+  pca_pvals[p,1] <- cor.test(pca_AS$x[,p],age)$p.value
+}
+for (p in 1:10){
+  pca_pvals[p,2] <- summary(pca_AS)$importance[2,p]
+}
+p1 <- ggplot() +
+        geom_point(aes(x = as.factor(1:10), y = -log10(pca_pvals[,1]), size = 1)) +
+        geom_hline(yintercept = -log10(0.05), color = 'red', linetype = 'dashed', size = 1) +
+        xlab('PC') +
+        ylab('-log10(p)') + 
+        theme(legend.position = 'none') +
+        ggtitle(label = '', subtitle = paste('Bcells',i,sep=''))
+p2 <- ggplot() +
+        geom_point(aes(x = as.factor(1:10), y = pca_pvals[,2])) +
+        geom_line(aes(x = as.factor(1:10), y = pca_pvals[,2], group = 1)) +
+        xlab('PC') +
+        ylab('PVE by PC') +
+        ggtitle(label = '', subtitle = paste('Bcells',i,sep=''))
+p_all <- plot_grid(p1,p2)
+p_all
+```
+```{r CD14high monocytes, warning=FALSE, message=FALSE}
+tmp_pseudobulkMeans <- generatePseudobulkMeans(clusterNum = c(6))
+tmp_residuals <- generatePseudobulkMeansResiduals(object_pseudobulk = tmp_pseudobulkMeans)
+pca_AS <- prcomp(cov(tmp_residuals))
+pca_pvals <- matrix(nrow = 10, ncol = 2)
+for (p in 1:10){
+  pca_pvals[p,1] <- cor.test(pca_AS$x[,p],age)$p.value
+}
+for (p in 1:10){
+  pca_pvals[p,2] <- summary(pca_AS)$importance[2,p]
+}
+p1 <- ggplot() +
+        geom_point(aes(x = as.factor(1:10), y = -log10(pca_pvals[,1]), size = 1)) +
+        geom_hline(yintercept = -log10(0.05), color = 'red', linetype = 'dashed', size = 1) +
+        xlab('PC') +
+        ylab('-log10(p)') + 
+        theme(legend.position = 'none') +
+        ggtitle(label = '', subtitle = paste('CD14high',i,sep=''))
+p2 <- ggplot() +
+        geom_point(aes(x = as.factor(1:10), y = pca_pvals[,2])) +
+        geom_line(aes(x = as.factor(1:10), y = pca_pvals[,2], group = 1)) +
+        xlab('PC') +
+        ylab('PVE by PC') +
+        ggtitle(label = '', subtitle = paste('CD14high',i,sep=''))
+p_all <- plot_grid(p1,p2)
+p_all
+```
+```{r CD14low monocytes, warning=FALSE, message=FALSE}
+tmp_pseudobulkMeans <- generatePseudobulkMeans(clusterNum = c(7))
+tmp_residuals <- generatePseudobulkMeansResiduals(object_pseudobulk = tmp_pseudobulkMeans)
+pca_AS <- prcomp(cov(tmp_residuals))
+pca_pvals <- matrix(nrow = 10, ncol = 2)
+for (p in 1:10){
+  pca_pvals[p,1] <- cor.test(pca_AS$x[,p],age)$p.value
+}
+for (p in 1:10){
+  pca_pvals[p,2] <- summary(pca_AS)$importance[2,p]
+}
+p1 <- ggplot() +
+        geom_point(aes(x = as.factor(1:10), y = -log10(pca_pvals[,1]), size = 1)) +
+        geom_hline(yintercept = -log10(0.05), color = 'red', linetype = 'dashed', size = 1) +
+        xlab('PC') +
+        ylab('-log10(p)') + 
+        theme(legend.position = 'none') +
+        ggtitle(label = '', subtitle = paste('CD14low',i,sep=''))
+p2 <- ggplot() +
+        geom_point(aes(x = as.factor(1:10), y = pca_pvals[,2])) +
+        geom_line(aes(x = as.factor(1:10), y = pca_pvals[,2], group = 1)) +
+        xlab('PC') +
+        ylab('PVE by PC') +
+        ggtitle(label = '', subtitle = paste('CD14low',i,sep=''))
+p_all <- plot_grid(p1,p2)
+p_all
+```
