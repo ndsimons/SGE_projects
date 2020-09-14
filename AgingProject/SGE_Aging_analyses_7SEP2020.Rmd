@@ -9,7 +9,8 @@ output:
 ---
 
 ```{r setup, include=FALSE, message=FALSE}
-knitr::opts_chunk$set(echo = TRUE, cache = T, cache.lazy = FALSE, message = FALSE)
+#cache = T, cache.lazy = FALSE,
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
 library(ggplot2)
 library(limma)
 library(edgeR)
@@ -49,6 +50,8 @@ AS <- readRDS(file = '/Users/noah/Desktop/SGE_data_objects/AS_7SEP20.rds')
 Here we are matching the cell-type clustering of the SGE data as follows:
 
 ![](/Users/noah/Desktop/AS_DimPlot_celltypes.png.001.png)
+<br>
+<br>
 
 ## Single-cell proportions vs flow proportions
 ```{r, warning=FALSE, message=FALSE}
@@ -83,18 +86,16 @@ colnames(cellcount.mat) <- c('cluster 0',
 rownames(cellcount.mat) <- ind_list
 
 # combine clusters to get cell types
-cellcount.mat2 <- as.data.frame(matrix(nrow = 14, ncol = 7))
+cellcount.mat2 <- as.data.frame(matrix(nrow = 14, ncol = 6))
 #add cluster together to get cell type-level counts
 cellcount.mat2[,1] <- cellcount.mat[,1] + cellcount.mat[,4]
-cellcount.mat2[,2] <- cellcount.mat[,2]
-cellcount.mat2[,3] <- cellcount.mat[,3]
-cellcount.mat2[,4] <- cellcount.mat[,5] + cellcount.mat[,9]
-cellcount.mat2[,5] <- cellcount.mat[,6]
-cellcount.mat2[,6] <- cellcount.mat[,7]
-cellcount.mat2[,7] <- cellcount.mat[,8]
+cellcount.mat2[,2] <- cellcount.mat[,2] + cellcount.mat[,3]
+cellcount.mat2[,3] <- cellcount.mat[,5] + cellcount.mat[,9]
+cellcount.mat2[,4] <- cellcount.mat[,6]
+cellcount.mat2[,5] <- cellcount.mat[,7]
+cellcount.mat2[,6] <- cellcount.mat[,8]
 colnames(cellcount.mat2) <- c('CD4', 
-                              'CD8_A', 
-                              'CD8_B', 
+                              'CD8', 
                               'Bcells',
                               'NK',
                               'CD14hi', 
@@ -107,7 +108,9 @@ raw counts matrix for cell types
 knitr::kable(cellcount.mat2, format = 'simple')
 ```
 ```{r}
+
 # calculate proportions
+
 cellprops.mat <- cellcount.mat2
 for (i in 1:14){
   cellprops.mat[i,]  <- cellcount.mat2[i,] / sum(cellcount.mat2)
@@ -139,18 +142,19 @@ flow_props <- as.data.frame(matrix(nrow = 13, ncol = 7))
 rownames(flow_props) <- rownames(flow_props.tmp)
 flow_props$V1 <- flow_props.tmp$CD4.cells
 flow_props$V2 <- flow_props.tmp$CD8.cells
-flow_props$V3 <- flow_props.tmp$CD8.cells
-flow_props$V4 <- flow_props.tmp$B.cells..CD8.. + flow_props.tmp$B.cells..CD8...1
-flow_props$V5 <- flow_props.tmp$NK.cells
-flow_props$V6 <- flow_props.tmp$Class..Mono..CD14.CD16..
-flow_props$V7 <- flow_props.tmp$Act..Mono..CD14.CD16.. + flow_props.tmp$Act..Mono..CD14.CD16...1
+flow_props$V3 <- flow_props.tmp$B.cells..CD8.. + flow_props.tmp$B.cells..CD8...1
+flow_props$V4 <- flow_props.tmp$NK.cells
+flow_props$V5 <- flow_props.tmp$Class..Mono..CD14.CD16..
+flow_props$V6 <- flow_props.tmp$Act..Mono..CD14.CD16.. + flow_props.tmp$Act..Mono..CD14.CD16...1
 colnames(flow_props) <- colnames(cellcount.mat2)
 
 # subset sc proportions to match 13 individuals in flow data
 cellprops.mat_sub <- subset(cellprops.mat, rownames(cellprops.mat) %in% rownames(flow_props)) 
 ```
+
+Plots for SC vs. flow proportions. Here I've combined the two CD8 subclusters from SC data, and I'm using classical monocytes from flow as analog to CD14high in SC, and the combined activated monocytes as in flow as analog to CD14low in SC. 
 ```{r}
-for (i in 1:7){
+for (i in 1:6){
   print(ggplot(flow_props, aes(x=cellprops.mat_sub[,i], y=flow_props[,i])) +
           geom_point() +
           stat_smooth(method = 'lm', color = 'black') +
@@ -160,15 +164,24 @@ for (i in 1:7){
                     stat(r.squared), stat(p.value))),
                     parse = TRUE) +
           xlab(paste(colnames(flow_props)[i], ' single-cell')) +
-          ylab(paste(colnames(flow_props)[i], ' flow'))
+          ylab(paste(colnames(flow_props)[i], ' flow')) +
+          ggtitle(colnames(flow_props)[i])
         )
 }
 ```
 
-Correlations between single cell and flow proportions vary across cell types. To summary, moderately good positive correlation for CD4 T cells, neither of the CD8 props look very good. NK cells, B cells, and both monocytes populations look very strongly correlated.
+Correlations between single cell and flow proportions Overall look pretty good, particularly for B, NK,and monocytes
 
 
 ## PCA on cell type composition
+Here I'm performing a PCA analysis looking at the correlation between age and the top PCs of cell type composition. Here I'll lay out the exact steps taken, starting from an 14 x 7 matrix of cell counts with individuals on the rows and cell types on the columns:
+1. divide each cell by the sum of the entire matrix to get proportions
+2. divide each value by it's rowSum so each individuals proportions sum to one
+3. transpose matrix, logit transform proportions, and regress out group effects
+4. perform PCA (prcomp) on covariance matrix of cell proportion residuals (14 x 14)
+5. calculate correlation between age and each PC
+6. re-run PCA on rectangular matrix of cell proportion residuals to extract loadings of each cell type on PCs
+
 ```{r, message=FALSE, warning=FALSE}
 # define age, group, and individuals names
 age <- c(21.54,10.99,10.96,4.47,5.31,22.36,21.53,10.62,11.41,23.3,19.52,11.23,3.52,5.18)
@@ -185,16 +198,47 @@ ind_list <- gsub("_","",ind_list)
 #CD14hi: 6
 #CD14low: 7
 
+#redo cellprops to split the CD8 clusters
+cellcount.mat3 <- as.data.frame(matrix(nrow = 14, ncol = 7))
+#add cluster together to get cell type-level counts
+cellcount.mat3[,1] <- cellcount.mat[,1] + cellcount.mat[,4]
+cellcount.mat3[,2] <- cellcount.mat[,2]
+cellcount.mat3[,3] <- cellcount.mat[,3]
+cellcount.mat3[,4] <- cellcount.mat[,5] + cellcount.mat[,9]
+cellcount.mat3[,5] <- cellcount.mat[,6]
+cellcount.mat3[,6] <- cellcount.mat[,7]
+cellcount.mat3[,7] <- cellcount.mat[,8]
+colnames(cellcount.mat3) <- c('CD4', 
+                              'CD8_A', 
+                              'CD8_B', 
+                              'Bcells',
+                              'NK',
+                              'CD14hi', 
+                              'CD14low')
+rownames(cellcount.mat3) <- ind_list
+
+# calculate proportions
+cellprops.mat <- cellcount.mat3
+for (i in 1:14){
+  cellprops.mat[i,]  <- cellcount.mat3[i,] / sum(cellcount.mat3)
+}
+
+# divide by rowSums so proportions sum to one per individual
+for (i in 1:14){
+  cellprops.mat[i,] <- cellprops.mat[i,] / sum(cellprops.mat[i,])
+}
 
 cellprops.mat <- t(cellprops.mat)
 design <- model.matrix(~0+group)
-#v <- logit(cellprops.mat)
-v <- cellprops.mat
-fit <-lmFit(v,design)
+#
+v <- logit(cellprops.mat)
+#v <- cellprops.mat
+fit <- lmFit(v,design)
 fit <- eBayes(fit)
 cellprop.resid <-residuals.MArrayLM(object=fit, v)
-
-pca <- prcomp(t(cellprop.resid))
+```
+```{r, message=FALSE}
+pca <- prcomp(cov(cellprop.resid))
 pca_age_cors <- vector()
 for (i in 1:7){
   #print(cor.test(pca$x[,i],age)$p.value)
@@ -225,7 +269,7 @@ qplot(pca$x[,1],pca$x[,2],col=age,size=1.5)+
   ylab(paste("PC2","\nPVE =",round(summary(pca)$imp[2,2],2))) 
 
 #qplot(age, pca$x[,1], col=age,size=1) + xlab('age') + ylab(paste("PC1","\nPVE =",round(summary(pca)$imp[2,1],2))) + stat_smooth(method = 'lm', #color='black', size = 1) 
-qplot(age, pca$x[,4], col=age,size=1) + xlab('age') + ylab(paste("PC4","\nPVE =",round(summary(pca)$imp[2,4],2))) + stat_smooth(method = 'lm', color='black', size = 1) 
+qplot(age, pca$x[,3], col=age,size=1) + xlab('age') + ylab(paste("PC3","\nPVE =",round(summary(pca)$imp[2,3],2))) + stat_smooth(method = 'lm', color='black', size = 1) 
 #+ scale_color_viridis_c(option = 'E')
 #ggsave(filename = '/Users/noah/Desktop/agePC1.png', scale = 0.5)
 ```
@@ -235,11 +279,11 @@ qplot(age, pca$x[,4], col=age,size=1) + xlab('age') + ylab(paste("PC4","\nPVE ="
 knitr::kable(prcomp(t(cellprop.resid))$rotation, format = "simple", digits = 2)
 ```
 
-In this updated analysis age appears to be most strongly correlated with PC4, which explains ~11% of the variance.
+Age is most strongly related to PC3, which explains ~12% of variance in cell composition. Monocytes and B cells load most heavily on PC3. 
 
 
 ## PCA on pseudobulk gene expression (total PBMCs)
-```{r}
+```{r generate pseudobulk means object, cache=TRUE, cache.lazy=FALSE}
 #### Now let's look at the PCA for the gene expression data itself
 sce <- as.SingleCellExperiment(AS, assay="RNA")
 ## QC metrics ##
@@ -276,8 +320,9 @@ fit <- eBayes(fit)
 residuals <-residuals.MArrayLM(object=fit, object_pseudobulkMeans)
 residuals <- residuals[order(rownames(residuals)),]
 residuals <- as.data.frame(residuals)
-
-pca_AS <- prcomp(t(residuals))
+```
+```{r PCA on gene expression}
+pca_AS <- prcomp(cov(residuals))
 #for (i in 1:10){
 #  print(cor.test(pca_AS$x[,i],age)$p.value)
 #}
@@ -307,16 +352,16 @@ ggplot() +
 qplot(age, pca_AS$x[,3], col=age,size=1) + xlab('age') + ylab(paste("PC3","\nPVE =",round(summary(pca_AS)$imp[2,3],2))) + stat_smooth(method = 'lm', color='black', size = 1)
 ```
 
-Now I'll run a linear model to test the association between age and PC1 of gene expression while controlling for the top 2 PCs of cell composition
+Now I'll run a linear model to test the association between age and PC3 of gene expression while controlling for the top 2 PCs of cell composition
 ```{r}
-knitr::kable(summary(lm(pca_AS$x[,1] ~ age + pca$x[,1] + pca$x[,2]))$coefficients, format = 'simple', digits = 3)
+knitr::kable(summary(lm(pca_AS$x[,3] ~ age + pca$x[,1] + pca$x[,2]))$coefficients, format = 'simple', digits = 3)
 ```
 
 It looks like controlling for cell composition does not improve the relationshipnship between age and PC1 of gene expression in total PBMC pseudobulk
 <br>
 
 ## PCA on gene expression in individual cell types
-```{r CD4+ T cells, warning=FALSE, message=FALSE}
+```{r CD4+ T cells, warning=FALSE, message=FALSE, cache=T, cache.lazy=FALSE}
 tmp_pseudobulkMeans <- generatePseudobulkMeans(clusterNum = c(0,3))
 tmp_residuals <- generatePseudobulkMeansResiduals(object_pseudobulk = tmp_pseudobulkMeans)
 pca_AS <- prcomp(cov(tmp_residuals))
@@ -343,7 +388,7 @@ p2 <- ggplot() +
 p_all <- plot_grid(p1,p2)
 p_all
 ```
-```{r CD8_A+ T cells, warning=FALSE, message=FALSE}
+```{r CD8_A+ T cells, warning=FALSE, message=FALSE, cache=T, cache.lazy=FALSE}
 tmp_pseudobulkMeans <- generatePseudobulkMeans(clusterNum = c(1))
 tmp_residuals <- generatePseudobulkMeansResiduals(object_pseudobulk = tmp_pseudobulkMeans)
 pca_AS <- prcomp(cov(tmp_residuals))
@@ -370,7 +415,7 @@ p2 <- ggplot() +
 p_all <- plot_grid(p1,p2)
 p_all
 ```
-```{r CD8_B+ T cells, warning=FALSE, message=FALSE}
+```{r CD8_B+ T cells, warning=FALSE, message=FALSE, cache=T, cache.lazy=FALSE}
 tmp_pseudobulkMeans <- generatePseudobulkMeans(clusterNum = c(2))
 tmp_residuals <- generatePseudobulkMeansResiduals(object_pseudobulk = tmp_pseudobulkMeans)
 pca_AS <- prcomp(cov(tmp_residuals))
@@ -397,7 +442,7 @@ p2 <- ggplot() +
 p_all <- plot_grid(p1,p2)
 p_all
 ```
-```{r NK, warning=FALSE, message=FALSE}
+```{r NK, warning=FALSE, message=FALSE, cache=T, cache.lazy=FALSE}
 tmp_pseudobulkMeans <- generatePseudobulkMeans(clusterNum = c(5))
 tmp_residuals <- generatePseudobulkMeansResiduals(object_pseudobulk = tmp_pseudobulkMeans)
 pca_AS <- prcomp(cov(tmp_residuals))
@@ -424,7 +469,7 @@ p2 <- ggplot() +
 p_all <- plot_grid(p1,p2)
 p_all
 ```
-```{r B cells, warning=FALSE, message=FALSE}
+```{r B cells, warning=FALSE, message=FALSE, cache=T, cache.lazy=FALSE}
 tmp_pseudobulkMeans <- generatePseudobulkMeans(clusterNum = c(4,8))
 tmp_residuals <- generatePseudobulkMeansResiduals(object_pseudobulk = tmp_pseudobulkMeans)
 pca_AS <- prcomp(cov(tmp_residuals))
@@ -451,7 +496,7 @@ p2 <- ggplot() +
 p_all <- plot_grid(p1,p2)
 p_all
 ```
-```{r CD14high monocytes, warning=FALSE, message=FALSE}
+```{r CD14high monocytes, warning=FALSE, message=FALSE, cache=T, cache.lazy=FALSE}
 tmp_pseudobulkMeans <- generatePseudobulkMeans(clusterNum = c(6))
 tmp_residuals <- generatePseudobulkMeansResiduals(object_pseudobulk = tmp_pseudobulkMeans)
 pca_AS <- prcomp(cov(tmp_residuals))
@@ -478,7 +523,7 @@ p2 <- ggplot() +
 p_all <- plot_grid(p1,p2)
 p_all
 ```
-```{r CD14low monocytes, warning=FALSE, message=FALSE}
+```{r CD14low monocytes, warning=FALSE, message=FALSE, cache=T, cache.lazy=FALSE}
 tmp_pseudobulkMeans <- generatePseudobulkMeans(clusterNum = c(7))
 tmp_residuals <- generatePseudobulkMeansResiduals(object_pseudobulk = tmp_pseudobulkMeans)
 pca_AS <- prcomp(cov(tmp_residuals))
@@ -766,6 +811,7 @@ To address these power limitations, we will try two approaches: 1) generate an a
 
 ### Gene-level modeling in ascertainment set
 In the Cayo data, there are 153 significant age effect genes at an FDR < 0.1. I think we want to model more that that so I'll take genes with an FDR < 0.3, which gives us 450 genes. Note: each cell type in our single-cell data set will have a slightly different intersection gene set with the cayo gene set. 
+Some metadata info re: the cayo data set: 48 individuals, both sexes, age range 4-24 yrs.
 
 Cayo data preprocessing
 ```{r}
@@ -787,28 +833,62 @@ Results plots of age effects models on ascertainment gene set
 
 Total PBMCs
 ![](/Users/noah/Desktop/SGE_behavioral_project_git/SGE_Behavioral_Project/totalPBMC_Means.dashboard_plusPCs.png)
+```{r}
+load('/Users/noah/Desktop/SGE_behavioral_project_git/SGE_Behavioral_Project/pseudobulk.age.modelRes.FDR.RData')
+load('/Users/noah/Desktop/SGE_behavioral_project_git/SGE_Behavioral_Project/pseudobulk.age.modelRes.FDR_AGS.RData')
+qqplot(-log10(totalPBMC_modelRes_fdr$p_value_age),-log10(totalPBMC_modelRes_fdr_AGS$p_value_age), xlab='-log10(p) all genes', ylab='-log10(p) ascertainment set', main='total PBMCs')
+abline(0,1)
+```
+
 
 CD4 T cells
 ![](/Users/noah/Desktop/SGE_behavioral_project_git/SGE_Behavioral_Project/CD4_Means.dashboard_AGS.png)
+```{r}
+qqplot(-log10(CD4_modelRes_fdr$p_value_age),-log10(CD4_modelRes_fdr_AGS$p_value_age), xlab='-log10(p) all genes', ylab='-log10(p) ascertainment set', main='CD4')
+abline(0,1)
+```
 
 CD8_A T cells
 ![](/Users/noah/Desktop/SGE_behavioral_project_git/SGE_Behavioral_Project/CD8_A_Means.dashboard_AGS.png)
+```{r}
+qqplot(-log10(CD8_A_modelRes_fdr$p_value_age),-log10(CD8_A_modelRes_fdr_AGS$p_value_age), xlab='-log10(p) all genes', ylab='-log10(p) ascertainment set', main='CD8_A')
+abline(0,1)
+```
 
 CD8_B T cells
 ![](/Users/noah/Desktop/SGE_behavioral_project_git/SGE_Behavioral_Project/CD8_B_Means.dashboard_AGS.png)
+```{r}
+qqplot(-log10(CD8_B_modelRes_fdr$p_value_age),-log10(CD8_B_modelRes_fdr_AGS$p_value_age), xlab='-log10(p) all genes', ylab='-log10(p) ascertainment set', main='CD8_B')
+abline(0,1)
+```
 
 NK cells
 ![](/Users/noah/Desktop/SGE_behavioral_project_git/SGE_Behavioral_Project/NK_Means.dashboard_AGS.png)
+```{r}
+qqplot(-log10(NK_modelRes_fdr$p_value_age),-log10(NK_modelRes_fdr_AGS$p_value_age), xlab='-log10(p) all genes', ylab='-log10(p) ascertainment set', main='NK')
+abline(0,1)
+```
 
 B cells
 ![](/Users/noah/Desktop/SGE_behavioral_project_git/SGE_Behavioral_Project/Bcell_Means.dashboard_AGS.png)
+```{r}
+qqplot(-log10(Bcells_modelRes_fdr$p_value_age),-log10(Bcells_modelRes_fdr_AGS$p_value_age), xlab='-log10(p) all genes', ylab='-log10(p) ascertainment set', main='B cells')
+abline(0,1)
+```
 
 CD14high monocytes
 ![](/Users/noah/Desktop/SGE_behavioral_project_git/SGE_Behavioral_Project/CD14high_Means.dashboard_AGS.png)
+```{r}
+qqplot(-log10(CD14high_modelRes_fdr$p_value_age),-log10(CD14high_modelRes_fdr_AGS$p_value_age), xlab='-log10(p) all genes', ylab='-log10(p) ascertainment set', main='CD14high mono')
+abline(0,1)
+```
 
 CD14low monocytes
 ![](/Users/noah/Desktop/SGE_behavioral_project_git/SGE_Behavioral_Project/CD14low_Means.dashboard_AGS.png)
-
+```{r}
+qqplot(-log10(CD14low_modelRes_fdr$p_value_age),-log10(CD14low_modelRes_fdr_AGS$p_value_age), xlab='-log10(p) all genes', ylab='-log10(p) ascertainment set', main='CD14low mono')
+abline(0,1)
+```
 
 To summarize, there is a signal of age effects on the total PBMCs (this model also included PCs 1 & 2 of cell type composition), but not for the individual cell types. 
 
@@ -825,25 +905,53 @@ Results plots
 
 CD4
 ![](/Users/noah/Desktop/SGE_behavioral_project_git/SGE_Behavioral_Project/CD4_Means.dashboard_AGS_SGE.png)
+```{r}
+load('/Users/noah/Desktop/SGE_behavioral_project_git/SGE_Behavioral_Project/pseudobulk.age.modelRes.FDR_AGS_SGE.RData')
+qqplot(-log10(CD4_modelRes_fdr$p_value_age),-log10(CD4_modelRes_fdr_AGS_SGE$p_value_age), xlab='-log10(p) all genes', ylab='-log10(p) ascertainment set', main='CD4')
+abline(0,1)
+```
 
 CD8_A
 ![](/Users/noah/Desktop/SGE_behavioral_project_git/SGE_Behavioral_Project/CD8_A_Means.dashboard_AGS_SGE.png)
+```{r}
+qqplot(-log10(CD8_A_modelRes_fdr$p_value_age),-log10(CD8_A_modelRes_fdr_AGS_SGE$p_value_age), xlab='-log10(p) all genes', ylab='-log10(p) ascertainment set', main='CD8_A')
+abline(0,1)
+```
 
 CD8_B
 ![](/Users/noah/Desktop/SGE_behavioral_project_git/SGE_Behavioral_Project/CD8_B_Means.dashboard_AGS_SGE.png)
+```{r}
+qqplot(-log10(CD8_B_modelRes_fdr$p_value_age),-log10(CD8_B_modelRes_fdr_AGS_SGE$p_value_age), xlab='-log10(p) all genes', ylab='-log10(p) ascertainment set', main='CD8_A')
+abline(0,1)
+```
 
 NK
 ![](/Users/noah/Desktop/SGE_behavioral_project_git/SGE_Behavioral_Project/NK_Means.dashboard_AGS_SGE.png)
+```{r}
+qqplot(-log10(NK_modelRes_fdr$p_value_age),-log10(NK_modelRes_fdr_AGS_SGE$p_value_age), xlab='-log10(p) all genes', ylab='-log10(p) ascertainment set', main='CD8_A')
+abline(0,1)
+```
 
 B cell
 ![](/Users/noah/Desktop/SGE_behavioral_project_git/SGE_Behavioral_Project/Bcell_Means.dashboard_AGS_SGE.png)
+```{r}
+qqplot(-log10(Bcells_modelRes_fdr$p_value_age),-log10(Bcells_modelRes_fdr_AGS_SGE$p_value_age), xlab='-log10(p) all genes', ylab='-log10(p) ascertainment set', main='CD8_A')
+abline(0,1)
+```
 
 CD14high mono
 ![](/Users/noah/Desktop/SGE_behavioral_project_git/SGE_Behavioral_Project/CD14high_Means.dashboard_AGS_SGE.png)
+```{r}
+qqplot(-log10(CD14high_modelRes_fdr$p_value_age),-log10(CD14high_modelRes_fdr_AGS_SGE$p_value_age), xlab='-log10(p) all genes', ylab='-log10(p) ascertainment set', main='CD8_A')
+abline(0,1)
+```
 
 CD14low mono
 ![](/Users/noah/Desktop/SGE_behavioral_project_git/SGE_Behavioral_Project/CD14low_Means.dashboard_AGS_SGE.png)
-
+```{r}
+qqplot(-log10(CD14low_modelRes_fdr$p_value_age),-log10(CD14low_modelRes_fdr_AGS_SGE$p_value_age), xlab='-log10(p) all genes', ylab='-log10(p) ascertainment set', main='CD8_A')
+abline(0,1)
+```
 
 ### MASH analysis
 The second approach taken to address the power limitations in detecting age effects is to leverage information from across all of the individual cell types using a meta-analytic approach (MASH) to determine if we see a shared signature of age across cell types. 
@@ -930,6 +1038,10 @@ U.c = cov_canonical(data)
 m = mash(data, c(U.c,U.ed))
 #print(get_loglik(m),digits = 10)
 ```
+Let's first look at the mixture proportions of the covariance matrices:
+```{r}
+barplot(get_estimated_pi(m)[3:9],las = 2)
+```
 
 Now we can ask how many significant genes have significant age effects in a least one cell types, and by extension how many genes are shared across all cell types.
 
@@ -970,3 +1082,93 @@ corrplot(x, method='color', cl.lim=c(0,1), type='upper', addCoef.col = "black", 
 ```
 
 One results that stands out is that the smaller CD8 cluster (CD8_B) does not share effects as strongly as you would think given the level of sharing between the other T cell cluster and NK cells. 
+
+For the shared effects, let's ask whether genes with age effects in at least one cell type overlap with age-effect genes from the Cayo ascertainment set or the SGE PC1.agg ascertainment set.
+First, cayo set:
+```{r}
+paste('nGenes overlapping: ', sum(names(m.sig) %in% cayo_sig_genes))
+fisher.test(matrix(c(7548, 438, 479, 12), nrow=2), alternative="greater")
+```
+
+The number of genes overlapping between MASH and the cayo ascertainment set is not significant. 
+
+Now looking at overlap with the SGE PC1.agg significant genes
+```{r}
+CD4.df <- readRDS('/Users/noah/Downloads/res_fdr_celltype_CD4T_cells_covariate_PC1.agg_nperms_100.RDS')
+CD8_A.df <- readRDS('/Users/noah/Downloads/res_fdr_celltype_0_covariate_PC1.agg_nperms_100.RDS')
+CD8_B.df <- readRDS('/Users/noah/Downloads/res_fdr_celltype_3_covariate_PC1.agg_nperms_100.RDS')
+CD14hi.df <- readRDS('/Users/noah/Downloads/res_fdr_celltype_mono.CD14hi_covariate_PC1.agg_nperms_100.RDS')
+CD14low.df <- readRDS('/Users/noah/Downloads/res_fdr_celltype_mono.CD14low_covariate_PC1.agg_nperms_100.RDS')
+NK.df <- readRDS('/Users/noah/Downloads/res_fdr_celltype_NK_covariate_PC1.agg_nperms_100.RDS')
+B.df <- readRDS('/Users/noah/Downloads/res_fdr_celltype_B_cells_covariate_PC1.agg_nperms_100.RDS')
+```
+
+CD4
+```{r}
+paste('nGenes overlapping: ', sum(names(m.sig) %in% unique(c(rownames(subset(CD4.df, `p_value_trtNC:PC1.agg` < 0.01)), rownames(subset(CD4.df, `p_value_trtLPS:PC1.agg` < 0.01))))))
+totalGeneNum <- nrow(CD4.df)
+sge_sig <- length(unique(c(rownames(subset(CD4.df, `p_value_trtNC:PC1.agg` < 0.01)), rownames(subset(CD4.df, `p_value_trtLPS:PC1.agg` < 0.01)))))
+mash_sig <- length(m.sig)
+overlap <- sum(names(m.sig) %in% unique(c(rownames(subset(CD4.df, `p_value_trtNC:PC1.agg` < 0.01)), rownames(subset(CD4.df, `p_value_trtLPS:PC1.agg` < 0.01)))))
+fisher.test(matrix(c(totalGeneNum - c(sge_sig+mash_sig+overlap), sge_sig, mash_sig, overlap), nrow=2), alternative="greater")
+```
+
+CD8_A
+```{r}
+paste('nGenes overlapping: ', sum(names(m.sig) %in% unique(c(rownames(subset(CD8_A.df, `qvalue_trtNC:PC1.agg` < 0.1)), rownames(subset(CD8_A.df, `qvalue_trtLPS:PC1.agg` < 0.1))))))
+totalGeneNum <- nrow(CD8_A.df)
+sge_sig <- length(unique(c(rownames(subset(CD8_A.df, `qvalue_trtNC:PC1.agg` < 0.1)), rownames(subset(CD8_A.df, `qvalue_trtLPS:PC1.agg` < 0.1)))))
+mash_sig <- length(m.sig)
+overlap <- sum(names(m.sig) %in% unique(c(rownames(subset(CD8_A.df, `qvalue_trtNC:PC1.agg` < 0.1)), rownames(subset(CD8_A.df, `qvalue_trtLPS:PC1.agg` < 0.1)))))
+fisher.test(matrix(c(totalGeneNum - c(sge_sig+mash_sig+overlap), sge_sig, mash_sig, overlap), nrow=2), alternative="greater")
+```
+
+CD8_B
+```{r}
+paste('nGenes overlapping: ', sum(names(m.sig) %in% unique(c(rownames(subset(CD8_B.df, `p_value_trtNC:PC1.agg` < 0.01)), rownames(subset(CD8_B.df, `p_value_trtLPS:PC1.agg` < 0.01))))))
+totalGeneNum <- nrow(CD8_B.df)
+sge_sig <- length(unique(c(rownames(subset(CD8_B.df, `p_value_trtNC:PC1.agg` < 0.01)), rownames(subset(CD8_B.df, `p_value_trtLPS:PC1.agg` < 0.01)))))
+mash_sig <- length(m.sig)
+overlap <- sum(names(m.sig) %in% unique(c(rownames(subset(CD8_B.df, `p_value_trtNC:PC1.agg` < 0.01)), rownames(subset(CD8_B.df, `p_value_trtLPS:PC1.agg` < 0.01)))))
+fisher.test(matrix(c(totalGeneNum - c(sge_sig+mash_sig+overlap), sge_sig, mash_sig, overlap), nrow=2), alternative="greater")
+```
+
+NK
+```{r}
+paste('nGenes overlapping: ', sum(names(m.sig) %in% unique(c(rownames(subset(NK.df, `qvalue_trtNC:PC1.agg` < 0.1)), rownames(subset(NK.df, `qvalue_trtLPS:PC1.agg` < 0.1))))))
+totalGeneNum <- nrow(NK.df)
+sge_sig <- length(unique(c(rownames(subset(NK.df, `qvalue_trtNC:PC1.agg` < 0.1)), rownames(subset(NK.df, `qvalue_trtLPS:PC1.agg` < 0.1)))))
+mash_sig <- length(m.sig)
+overlap <- sum(names(m.sig) %in% unique(c(rownames(subset(NK.df, `qvalue_trtNC:PC1.agg` < 0.1)), rownames(subset(NK.df, `qvalue_trtLPS:PC1.agg` < 0.1)))))
+fisher.test(matrix(c(totalGeneNum - c(sge_sig+mash_sig+overlap), sge_sig, mash_sig, overlap), nrow=2), alternative="greater")
+```
+
+B
+```{r}
+paste('nGenes overlapping: ', sum(names(m.sig) %in% unique(c(rownames(subset(B.df, `p_value_trtNC:PC1.agg` < 0.01)), rownames(subset(B.df, `p_value_trtLPS:PC1.agg` < 0.01))))))
+totalGeneNum <- nrow(B.df)
+sge_sig <- length(unique(c(rownames(subset(B.df, `p_value_trtNC:PC1.agg` < 0.01)), rownames(subset(B.df, `p_value_trtLPS:PC1.agg` < 0.01)))))
+mash_sig <- length(m.sig)
+overlap <- sum(names(m.sig) %in% unique(c(rownames(subset(B.df, `p_value_trtNC:PC1.agg` < 0.01)), rownames(subset(B.df, `p_value_trtLPS:PC1.agg` < 0.01)))))
+fisher.test(matrix(c(totalGeneNum - c(sge_sig+mash_sig+overlap), sge_sig, mash_sig, overlap), nrow=2), alternative="greater")
+```
+
+CD14hi
+```{r}
+paste('nGenes overlapping: ', sum(names(m.sig) %in% unique(c(rownames(subset(CD14hi.df, `qvalue_trtNC:PC1.agg` < 0.1)), rownames(subset(CD14hi.df, `qvalue_trtLPS:PC1.agg` < 0.1))))))
+totalGeneNum <- nrow(CD14hi.df)
+sge_sig <- length(unique(c(rownames(subset(CD14hi.df, `qvalue_trtNC:PC1.agg` < 0.1)), rownames(subset(CD14hi.df, `qvalue_trtLPS:PC1.agg` < 0.1)))))
+mash_sig <- length(m.sig)
+overlap <- sum(names(m.sig) %in% unique(c(rownames(subset(CD14hi.df, `qvalue_trtNC:PC1.agg` < 0.1)), rownames(subset(CD14hi.df, `qvalue_trtLPS:PC1.agg` < 0.1)))))
+fisher.test(matrix(c(totalGeneNum - c(sge_sig+mash_sig+overlap), sge_sig, mash_sig, overlap), nrow=2), alternative="greater")
+```
+
+CD14low
+```{r}
+paste('nGenes overlapping: ', sum(names(m.sig) %in% unique(c(rownames(subset(CD14low.df, `qvalue_trtNC:PC1.agg` < 0.1)), rownames(subset(CD14low.df, `qvalue_trtLPS:PC1.agg` < 0.1))))))
+totalGeneNum <- nrow(CD14low.df)
+sge_sig <- length(unique(c(rownames(subset(CD14low.df, `qvalue_trtNC:PC1.agg` < 0.1)), rownames(subset(CD14low.df, `qvalue_trtLPS:PC1.agg` < 0.1)))))
+mash_sig <- length(m.sig)
+overlap <- sum(names(m.sig) %in% unique(c(rownames(subset(CD14low.df, `qvalue_trtNC:PC1.agg` < 0.1)), rownames(subset(CD14low.df, `qvalue_trtLPS:PC1.agg` < 0.1)))))
+fisher.test(matrix(c(totalGeneNum - c(sge_sig+mash_sig+overlap), sge_sig, mash_sig, overlap), nrow=2), alternative="greater")
+```
