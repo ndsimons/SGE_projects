@@ -892,11 +892,6 @@ abline(0,1)
 
 To summarize, there is a signal of age effects on the total PBMCs (this model also included PCs 1 & 2 of cell type composition), but not for the individual cell types. 
 
-It also looks as though the ascertainment set is enriched for lower p values across the distribution.
-QQplot:
-![](/Users/noah/Desktop/SGE_behavioral_project_git/SGE_Behavioral_Project/totalPBMC_allGenesVascertainmentsetQQplot.png){width=50%}
-
-
 Another approach taken was to use PC1.agg-associated genes from SGE as the ascertainment set to ask about overlap between aging and PC1.agg. For each cell type in SGE we selected the intersection set of genes between NC and LPS with an p < 0.01 (with the exception of CD8_B, where I used a less restrictive nominal p value of < 0.05 to get more genes). 
 
 To summarize the results of this approach, we do not see a signature of age effects in the ascertainment set (based on PC1.agg effects)
